@@ -39,7 +39,7 @@ id = "<your-kv-namespace-id>"
 # 用户站点文件存储（独立 KV namespace，避免与限速、验证码数据混用）
 [[kv_namespaces]]
 binding = "FILES_KV"
-id = "<your-files-kv-namespace-id>"
+id = "0f32b271420c431da9565f9491869000"
 
 # 需要设置的 Secrets（wrangler secret put）：
 #   CAPTCHA_SECRET      图片验证码 HMAC 密钥（必需）
