@@ -2,6 +2,7 @@
 /// Turnstile 适配器已预留：设置 CAPTCHA_PROVIDER=turnstile 并实现 verify() 即可切换。
 /// 注意：Turnstile 需要前端渲染 widget 并提交 token，本文件只提供服务端校验骨架。
 import type { Env } from "../env";
+import { getConfig } from "../config";
 import { AppError, CAPTCHA_FAILED } from "./errors";
 import { verifyCaptcha } from "./captcha";
 
@@ -50,5 +51,5 @@ export const turnstileCaptchaProvider: CaptchaProvider = {
 };
 
 export function getCaptchaProvider(env: Env): CaptchaProvider {
-  return env.CAPTCHA_PROVIDER === "turnstile" ? turnstileCaptchaProvider : imageCaptchaProvider;
+  return getConfig().captcha.provider === "turnstile" ? turnstileCaptchaProvider : imageCaptchaProvider;
 }

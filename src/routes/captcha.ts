@@ -11,8 +11,8 @@ export const captchaRoutes = new Hono<AppEnv>();
 captchaRoutes.get("/", async (c) => {
   const ip = clientIp(c);
   await consumeRate(c.env, RULES.captcha, ip ?? "unknown");
-  const { captchaId, image } = await issueCaptcha(c.env, ip);
-  const dataUri = `data:image/svg+xml;base64,${bytesToB64(new TextEncoder().encode(image))}`;
+  const { captchaId, svg } = await issueCaptcha(c.env, ip);
+  const image = `data:image/svg+xml;base64,${bytesToB64(new TextEncoder().encode(svg))}`;
   c.header("Cache-Control", "no-store");
-  return c.json({ captchaId, image: dataUri });
+  return c.json({ captchaId, image });
 });

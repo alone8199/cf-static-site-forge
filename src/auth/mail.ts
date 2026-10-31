@@ -1,44 +1,63 @@
-/// 邮件发送适配器。
-/// - MAIL_MODE=none（默认，生产安全）：不发送任何邮件，验证 token 不会泄露给任何人。
-///   此时邮箱无法自助验证，只能通过 BOOTSTRAP_TOKEN 完成管理员初始化（见 routes/bootstrap.ts）。
-/// - MAIL_MODE=dev（仅本地开发）：验证 token 通过 API 响应返回，方便调试。切勿在生产启用。
-/// - MAIL_MODE=webhook（生产增强项，预留）：POST 到 MAIL_WEBHOOK_URL，由你的邮件服务发送。
+/// 验证邮件发送。模式由 config/app.config.ts 的 mail.mode 决定：
+///   - smtp（默认）：通过 SMTP 发送。凭据来自 SMTP_USERNAME / SMTP_PASSWORD Secret。
+///   - dev：仅本地开发。令牌随接口响应返回。生产环境禁止启用。
+///   - none：不发送，只能通过 BOOTSTRAP_TOKEN 完成管理员初始化。
 import type { Env } from "../env";
-
-export type MailMode = "none" | "dev" | "webhook";
-
-export function mailMode(env: Env): MailMode {
-  const m = env.MAIL_MODE;
-  return m === "dev" || m === "webhook" ? m : "none";
-}
+import { getConfig } from "../config";
+import { sendSmtpMail, SmtpError } from "../mail/smtp";
 
 export interface VerificationDelivery {
-  /** 仅 dev 模式下返回 token；其余模式为 undefined */
+  /** 仅 dev 模式返回令牌 */
   devToken?: string;
   sent: boolean;
 }
 
-export async function deliverVerification(
-  env: Env,
-  email: string,
-  token: string,
-): Promise<VerificationDelivery> {
-  const mode = mailMode(env);
+export async function deliverVerification(env: Env, email: string, token: string): Promise<VerificationDelivery> {
+  const cfg = getConfig();
+  const mode = cfg.mail.mode;
+
   if (mode === "dev") {
     return { devToken: token, sent: false };
   }
-  if (mode === "webhook" && env.MAIL_WEBHOOK_URL) {
-    // 注意：不在日志中输出 token。
-    const res = await fetch(env.MAIL_WEBHOOK_URL, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        to: email,
-        subject: "验证您的邮箱",
-        link: `${env.APP_ORIGIN}/verify-email?token=${encodeURIComponent(token)}`,
-      }),
-    });
-    return { sent: res.ok };
+  if (mode === "none") {
+    return { sent: false };
   }
-  return { sent: false };
+
+  const link = `${cfg.app.origin}/verify-email?token=${encodeURIComponent(token)}`;
+  const text = [
+    `您好，`,
+    ``,
+    `请点击下面的链接完成 ${cfg.app.name} 的邮箱验证（24 小时内有效）：`,
+    link,
+    ``,
+    `如果这不是您本人的操作，请忽略此邮件。`,
+  ].join("\n");
+
+  try {
+    await sendSmtpMail(
+      {
+        host: cfg.mail.smtp.host,
+        port: cfg.mail.smtp.port,
+        tls: cfg.mail.smtp.tls,
+        timeoutMs: cfg.mail.smtp.timeoutMs,
+        requireAuth: cfg.mail.smtp.requireAuth,
+        heloName: new URL(cfg.app.origin).hostname,
+        username: env.SMTP_USERNAME,
+        password: env.SMTP_PASSWORD,
+      },
+      {
+        from: cfg.mail.from,
+        fromName: cfg.mail.fromName,
+        to: email,
+        subject: cfg.mail.subject,
+        text,
+        messageIdDomain: new URL(cfg.app.origin).hostname,
+      },
+    );
+    return { sent: true };
+  } catch (e) {
+    // 只记录错误步骤名，不记录邮箱、令牌或服务端原始响应
+    console.error("smtp_send_failed", e instanceof SmtpError ? e.step : "unknown");
+    return { sent: false };
+  }
 }

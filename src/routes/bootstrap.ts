@@ -22,6 +22,7 @@ import { audit } from "../lib/audit";
 import { nowSec } from "../auth/session";
 import { findUserByEmail, markEmailVerified } from "../db/users";
 import { resolveRole } from "../auth/roles";
+import { getAdminEmails } from "../config";
 
 export const bootstrapRoutes = new Hono<AppEnv>();
 
@@ -51,11 +52,7 @@ bootstrapRoutes.post("/", async (c) => {
   }
 
   // 只允许为环境变量中的超级用户邮箱执行初始化，其他邮箱无意义
-  const adminEmails = (c.env.ADMIN_EMAILS ?? "")
-    .split(",")
-    .map((e) => e.trim().toLowerCase())
-    .filter(Boolean);
-  if (!adminEmails.includes(input.email)) {
+  if (!getAdminEmails(c.env).includes(input.email)) {
     await audit(c.env, ip, { action: "bootstrap", target: "not_admin_email", result: "denied" });
     throw err.forbidden("该邮箱不在 ADMIN_EMAILS 中");
   }

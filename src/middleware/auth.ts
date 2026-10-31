@@ -2,11 +2,11 @@
 import type { Context, Next } from "hono";
 import type { Env } from "../env";
 import { loadSession, readSessionToken } from "../auth/session";
-
 import { findUserById, type UserRow } from "../db/users";
 import { resolveRole, type Role } from "../auth/roles";
 import { timingSafeEqual } from "../lib/crypto";
 import { err } from "../lib/errors";
+import { getConfig } from "../config";
 
 export interface AuthUser {
   id: string;
@@ -28,10 +28,10 @@ export function clientIp(c: Context): string | null {
   return c.req.header("cf-connecting-ip") ?? null;
 }
 
-/// Origin 校验：若请求带 Origin，必须等于主应用 Origin。
-export function originAllowed(env: Env, origin: string | undefined | null): boolean {
+/// Origin 校验：若请求带 Origin，必须等于主应用 Origin（来自配置）。
+export function originAllowed(origin: string | undefined | null): boolean {
   if (origin === undefined || origin === null) return true; // 非浏览器客户端由 CSRF token 约束
-  return origin === env.APP_ORIGIN;
+  return origin === getConfig().app.origin;
 }
 
 /// 解析当前用户（不强制登录）。返回 null 表示匿名。
@@ -48,21 +48,23 @@ export async function resolveCurrentUser(
   const row: UserRow | null = await findUserById(env, session.userId);
   if (!row || row.status !== "active") return null;
 
-  const user: AuthUser = {
-    id: row.id,
-    email: row.email,
-    emailVerified: row.email_verified === 1,
-    status: row.status,
-    // 每次请求重新计算角色，环境变量变更后立即对新请求生效
-    role: resolveRole(env, row),
+  return {
+    user: {
+      id: row.id,
+      email: row.email,
+      emailVerified: row.email_verified === 1,
+      status: row.status,
+      // 每次请求重新计算角色，环境变量变更后立即对新请求生效
+      role: resolveRole(env, row),
+    },
+    csrfToken: session.csrfToken,
   };
-  return { user, csrfToken: session.csrfToken };
 }
 
-/// 要求已登录，并对状态变更请求校验 CSRF（X-CSRF-Token 与 Origin）。
+/// 要求已登录；状态变更请求校验 Origin 与 X-CSRF-Token。
 export function requireAuth() {
   return async (c: Context<AppEnv>, next: Next) => {
-    if (!originAllowed(c.env, c.req.header("origin"))) {
+    if (!originAllowed(c.req.header("origin"))) {
       throw err.forbidden("请求来源不被允许");
     }
     const current = await resolveCurrentUser(c.env, c.req.header("cookie") ?? null);
@@ -87,8 +89,7 @@ export function requireSuperAdmin() {
   const base = requireAuth();
   return async (c: Context<AppEnv>, next: Next) => {
     await base(c, async () => {
-      const user = c.get("user");
-      if (!user.role.isSuperAdmin) throw err.forbidden("需要管理员权限");
+      if (!c.get("user").role.isSuperAdmin) throw err.forbidden("需要管理员权限");
       await next();
     });
   };

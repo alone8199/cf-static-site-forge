@@ -17,8 +17,13 @@ CSRF="<从登录响应的 csrfToken 复制>"
 npm test
 ```
 
-覆盖：路径穿越、扩展名白名单与黑名单、超级用户判定（未验证不生效、大小写、禁用账号）、
-PBKDF2 哈希、Host 分流、验证码 SVG 渲染。
+覆盖：路径穿越、扩展名白名单与黑名单（含多段与中间段）、黑名单文件名与目录、Windows 保留名、
+超级用户判定（未验证不生效、大小写、禁用账号）、PBKDF2 哈希、Host 分流、验证码 SVG 渲染。
+`test/content.test.ts` 覆盖内容级检查：改后缀伪装（ELF/PE/ZIP/WASM/shebang）、图片魔数匹配、
+服务端标记（`<?php`、`<%`）、NUL 与非 UTF-8 文本、HTML 危险标签、SVG 脚本/事件/外链/XXE 净化。
+
+> SMTP 客户端依赖 `cloudflare:sockets`，无法在 Node 环境直接单测，需用 `wrangler dev` 配合本地
+> SMTP 测试服务器（如 MailHog 的 `tls=none` 本地模式，仅限开发）手工验证。
 
 ---
 
@@ -230,7 +235,8 @@ wrangler d1 execute cf_static_site_forge --remote \
 
 - [ ] `wrangler.toml` 中没有真实 Secret
 - [ ] `.dev.vars` 未提交（`.gitignore` 已包含）
-- [ ] `MAIL_MODE` 生产为 `none` 或 `webhook`，不是 `dev`
+- [ ] `config/app.config.ts` 中 `mail.mode` 生产为 `smtp`（或 `none`），不是 `dev`
+- [ ] `mail.smtp.tls` 不是 `none`，且 SMTP 凭据已通过 Secret 设置
 - [ ] `BOOTSTRAP_TOKEN` 已删除或确认不再需要
 - [ ] `APP_ORIGIN` 与 `SITES_ROOT_DOMAIN` 指向正确域名
 - [ ] WAF、Rate Limiting、Bot Fight Mode 已启用

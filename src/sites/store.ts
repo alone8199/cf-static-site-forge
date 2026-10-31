@@ -1,12 +1,12 @@
 /// 站点与文件的 D1 / R2 操作。
 /// 不变量：
 ///   - R2 key 只由服务端生成：users/{ownerId}/sites/{siteId}/{uploadId}/{normalizedPath}
-///   - 用户输入的路径只用于 files.path 元数据匹配，不参与 R2 寻址拼接之外的任何用途
-///   - 提交（D1 批量事务）成功后才替换生效；失败则删除本次暂存的 R2 对象（回滚）
+///   - 用户路径只作为 files.path 元数据，不参与 R2 寻址拼接
+///   - 提交（D1 batch = 事务）成功后才替换生效；失败则删除本次暂存的 R2 对象（回滚）
 import type { Env } from "../env";
 import { randomId, sha256Hex } from "../lib/crypto";
 import { AppError } from "../lib/errors";
-import type { Limits } from "../env";
+import { getConfig, type Limits } from "../config";
 
 export interface SiteRow {
   id: string;
@@ -26,8 +26,6 @@ export interface StagedFile {
   sha256: string;
   contentType: string;
 }
-
-export const MAX_SITES_PER_USER = 20;
 
 export async function countActiveSites(env: Env, ownerId: string): Promise<number> {
   const row = await env.DB.prepare(
@@ -73,39 +71,42 @@ export async function listSitesByOwner(env: Env, ownerId: string): Promise<SiteR
   return res.results ?? [];
 }
 
-export async function listFileRows(
-  env: Env,
-  siteId: string,
-): Promise<{ path: string; r2_key: string; size: number; content_type: string }[]> {
+export interface FileRow {
+  path: string;
+  r2_key: string;
+  size: number;
+  content_type: string;
+}
+
+export async function listFileRows(env: Env, siteId: string): Promise<FileRow[]> {
   const res = await env.DB.prepare(
     `SELECT path, r2_key, size, content_type FROM files WHERE site_id = ?1`,
   )
     .bind(siteId)
-    .all<{ path: string; r2_key: string; size: number; content_type: string }>();
+    .all<FileRow>();
   return res.results ?? [];
 }
 
-/// 将暂存对象写入 R2。任一失败则删除已写入的对象并抛错。
+/// 暂存：把对象写入本次上传专属前缀。任一失败则删除已写入的对象并抛错。
 export async function stageObjects(
   env: Env,
   ownerId: string,
   siteId: string,
   uploadId: string,
-  files: { path: string; bytes: ArrayBuffer; contentType: string }[],
+  files: { path: string; bytes: Uint8Array; contentType: string }[],
 ): Promise<StagedFile[]> {
   const staged: StagedFile[] = [];
   try {
     for (const f of files) {
       const r2Key = `users/${ownerId}/sites/${siteId}/${uploadId}/${f.path}`;
-      const body = new Uint8Array(f.bytes);
-      await env.SITES_BUCKET.put(r2Key, body, {
+      await env.SITES_BUCKET.put(r2Key, f.bytes, {
         httpMetadata: { contentType: f.contentType },
       });
       staged.push({
         path: f.path,
         r2Key,
-        size: body.byteLength,
-        sha256: await sha256Hex(body),
+        size: f.bytes.byteLength,
+        sha256: await sha256Hex(f.bytes),
         contentType: f.contentType,
       });
     }
@@ -116,20 +117,11 @@ export async function stageObjects(
   }
 }
 
-/// 原子提交：一个 D1 batch（事务）内完成 upsert + 重算站点总量。
-/// 返回需要清理的旧 R2 key（提交成功后再删除）。
-export async function commitStaged(
-  env: Env,
-  siteId: string,
-  staged: StagedFile[],
-  now: number,
-): Promise<string[]> {
-  const existing = await env.DB.prepare(
-    `SELECT path, r2_key FROM files WHERE site_id = ?1`,
-  )
-    .bind(siteId)
-    .all<{ path: string; r2_key: string }>();
-  const oldByPath = new Map((existing.results ?? []).map((r) => [r.path, r.r2_key]));
+/// 原子提交：一个 D1 batch（事务）内完成 upsert + 重算站点总量与文件数。
+/// 返回被替换的旧 R2 key（提交成功后再清理）。
+export async function commitStaged(env: Env, siteId: string, staged: StagedFile[], now: number): Promise<string[]> {
+  const existing = await listFileRows(env, siteId);
+  const oldByPath = new Map(existing.map((r) => [r.path, r.r2_key]));
 
   const stmts = staged.map((f) =>
     env.DB.prepare(
@@ -149,7 +141,6 @@ export async function commitStaged(
        WHERE id = ?1`,
     ).bind(siteId, now),
   );
-
   await env.DB.batch(stmts);
 
   const replaced: string[] = [];
@@ -160,18 +151,17 @@ export async function commitStaged(
   return replaced;
 }
 
-/// 计算配额：旧文件被替换后剩余空间，新文件总量不得超过限制。
+/// 配额检查：合并“已有文件（被替换的除外）”与“本次新文件”，检查数量与总量。
 export function checkQuota(
   limits: Limits,
-  site: SiteRow,
   existing: { path: string; size: number }[],
   incoming: { path: string; size: number }[],
 ): void {
-  const existingByPath = new Map(existing.map((e) => [e.path, e.size]));
-  let total = 0;
   const merged = new Map<string, number>();
-  for (const [p, s] of existingByPath) merged.set(p, s);
+  for (const e of existing) merged.set(e.path, e.size);
   for (const f of incoming) merged.set(f.path, f.size);
+
+  let total = 0;
   for (const s of merged.values()) total += s;
 
   if (merged.size > limits.maxSiteFiles) {
@@ -180,29 +170,24 @@ export function checkQuota(
   if (total > limits.maxSiteBytes) {
     throw new AppError(413, "site_quota_exceeded", "站点总容量超过上限");
   }
-  void site;
 }
 
 export async function deleteObjects(env: Env, keys: string[]): Promise<void> {
-  // R2 delete 支持数组；逐个删除以便单个失败不影响其他
   for (const key of keys) {
     try {
       await env.SITES_BUCKET.delete(key);
     } catch {
-      // 清理失败只影响孤儿对象，不应影响主流程；不记录 key 以免泄露结构
+      // 清理失败只会留下孤儿对象，不影响主流程；不记录 key 以免泄露结构
     }
   }
 }
 
-/// 软删除站点：标记 deleted、删除文件元数据、清理 R2 对象
+/// 软删除站点：标记 deleted、删除文件元数据，并清理 R2 对象
 export async function softDeleteSite(env: Env, siteId: string, now: number): Promise<void> {
   const rows = await listFileRows(env, siteId);
   await env.DB.batch([
-    env.DB.prepare(`UPDATE sites SET status = 'deleted', updated_at = ?2 WHERE id = ?1`).bind(siteId, now),
+    env.DB.prepare(`UPDATE sites SET status = 'deleted', total_bytes = 0, file_count = 0, updated_at = ?2 WHERE id = ?1`).bind(siteId, now),
     env.DB.prepare(`DELETE FROM files WHERE site_id = ?1`).bind(siteId),
-    env.DB.prepare(
-      `UPDATE sites SET total_bytes = 0, file_count = 0 WHERE id = ?1`,
-    ).bind(siteId),
   ]);
   await deleteObjects(env, rows.map((r) => r.r2_key));
 }
@@ -215,6 +200,8 @@ export function newUploadId(): string {
   return randomId(8);
 }
 
-export function siteUrl(env: Env, siteId: string): string {
-  return `${env.SITES_SCHEME}://${siteId}.${env.SITES_ROOT_DOMAIN}/`;
+/// 站点访问地址（域名与协议来自配置）
+export function siteUrl(siteId: string): string {
+  const { scheme, rootDomain } = getConfig().sites;
+  return `${scheme}://${siteId}.${rootDomain}/`;
 }

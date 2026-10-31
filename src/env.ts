@@ -1,63 +1,25 @@
-/// 运行时环境绑定。敏感值只来自 Secret / .dev.vars，绝不写死在代码中。
+/// Worker 环境绑定。
+/// - 非机密配置：见 config/app.config.ts（域名、限额、SMTP、安全策略等）
+/// - 超级用户：wrangler.toml [vars] 中的 ADMIN_EMAILS / ADMIN_USER_IDS（规格要求，见 README）
+/// - 机密：只通过 Secret / .dev.vars 注入，绝不写死
 export interface Env {
+  // 绑定
   DB: D1Database;
   KV: KVNamespace;
   SITES_BUCKET: R2Bucket;
   ASSETS: Fetcher;
 
-  APP_ORIGIN: string;
-  SITES_ROOT_DOMAIN: string;
-  SITES_SCHEME: string;
+  // 超级用户（非机密，但由部署者控制）
+  ADMIN_EMAILS?: string;
+  ADMIN_USER_IDS?: string;
 
-  ADMIN_EMAILS: string;
-  ADMIN_USER_IDS: string;
-
-  SESSION_TTL_SECONDS: string;
-  PBKDF2_ITERATIONS: string;
-  CAPTCHA_TTL_SECONDS: string;
-  CAPTCHA_MAX_ATTEMPTS: string;
-  CAPTCHA_PROVIDER: string;
-  MAIL_MODE?: string;
-
-  MAX_FILE_BYTES: string;
-  MAX_UPLOAD_BYTES: string;
-  MAX_SITE_BYTES: string;
-  MAX_SITE_FILES: string;
-
-  // Secrets
+  // 机密
   CAPTCHA_SECRET: string;
   IP_HASH_SECRET: string;
-  SESSION_SECRET: string;
   BOOTSTRAP_TOKEN?: string;
-  MAIL_WEBHOOK_URL?: string;
+  SMTP_USERNAME?: string;
+  SMTP_PASSWORD?: string;
   TURNSTILE_SECRET?: string;
 }
 
-export interface Limits {
-  maxFileBytes: number;
-  maxUploadBytes: number;
-  maxSiteBytes: number;
-  maxSiteFiles: number;
-  sessionTtlSeconds: number;
-  pbkdf2Iterations: number;
-  captchaTtlSeconds: number;
-  captchaMaxAttempts: number;
-}
-
-export function readLimits(env: Env): Limits {
-  const num = (v: string | undefined, fallback: number): number => {
-    const n = Number(v);
-    return Number.isFinite(n) && n > 0 ? n : fallback;
-  };
-  return {
-    maxFileBytes: num(env.MAX_FILE_BYTES, 5 * 1024 * 1024),
-    maxUploadBytes: num(env.MAX_UPLOAD_BYTES, 20 * 1024 * 1024),
-    maxSiteBytes: num(env.MAX_SITE_BYTES, 100 * 1024 * 1024),
-    maxSiteFiles: num(env.MAX_SITE_FILES, 500),
-    sessionTtlSeconds: num(env.SESSION_TTL_SECONDS, 86400),
-    // 不允许被环境变量降到过低值
-    pbkdf2Iterations: Math.max(num(env.PBKDF2_ITERATIONS, 210000), 100000),
-    captchaTtlSeconds: num(env.CAPTCHA_TTL_SECONDS, 300),
-    captchaMaxAttempts: num(env.CAPTCHA_MAX_ATTEMPTS, 3),
-  };
-}
+export { readLimits } from "./config";

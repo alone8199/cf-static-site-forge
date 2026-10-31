@@ -1,6 +1,6 @@
 /// Worker 入口：按 Host 分流
-///   - {siteId}.{SITES_ROOT_DOMAIN}  → 用户静态站点（只读、沙箱、无 Cookie）
-///   - 其它（主应用 app.example.com） → API 与前端静态资源
+///   - {siteId}.{rootDomain}  → 用户静态站点（只读、沙箱、无 Cookie）
+///   - 其它（主应用）          → API 与前端静态资源
 import { Hono } from "hono";
 import type { Env } from "./env";
 import type { AppEnv } from "./middleware/auth";
@@ -13,6 +13,7 @@ import { adminRoutes } from "./routes/admin";
 import { bootstrapRoutes } from "./routes/bootstrap";
 import { siteIdFromHost, serveSite } from "./sites/serve";
 import { nowSec } from "./auth/session";
+import { getConfig } from "./config";
 
 const app = new Hono<AppEnv>();
 
@@ -41,7 +42,7 @@ app.onError((e, c) => {
 
 app.notFound((c) => c.json({ error: { code: "not_found", message: "资源不存在" } }, 404));
 
-// 前端静态资源（public/）由 Workers Assets 提供；未匹配 API 时回落到 index.html
+// 前端静态资源（public/）由 Workers Assets 提供；非 API 的未知路径回落到 index.html
 app.get("*", async (c) => {
   if (c.req.path.startsWith("/api/")) {
     return c.json({ error: { code: "not_found", message: "资源不存在" } }, 404);
@@ -58,29 +59,28 @@ app.get("*", async (c) => {
 
 export default {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
-    const url = new URL(request.url);
-    const siteId = siteIdFromHost(url.hostname, env.SITES_ROOT_DOMAIN);
+    const hostname = new URL(request.url).hostname;
+    const siteId = siteIdFromHost(hostname, getConfig().sites.rootDomain);
 
-    // 站点域：永远不进入主应用路由，避免站点请求触达 API 或 Cookie 逻辑
+    // 站点域永远不进入主应用路由，避免站点请求触达 API 或 Cookie 逻辑
     if (siteId === null) {
       return new Response("Not Found", {
         status: 404,
         headers: { "Content-Type": "text/plain; charset=utf-8", "X-Content-Type-Options": "nosniff" },
       });
     }
-    if (siteId !== undefined) {
-      return serveSite(request, env, siteId);
-    }
+    if (siteId !== undefined) return serveSite(request, env, siteId);
     return app.fetch(request, env, ctx);
   },
 
-  /// 定时清理：过期会话、过期验证 token、旧审计日志（保留 90 天）
+  /// 定时清理：过期会话、过期验证令牌、超过保留期的审计日志
   async scheduled(_event: ScheduledEvent, env: Env, _ctx: ExecutionContext): Promise<void> {
     const now = nowSec();
+    const retention = getConfig().audit.retentionDays * 86400;
     await env.DB.batch([
       env.DB.prepare(`DELETE FROM sessions WHERE expires_at < ?1`).bind(now),
       env.DB.prepare(`DELETE FROM email_verifications WHERE expires_at < ?1`).bind(now),
-      env.DB.prepare(`DELETE FROM audit_logs WHERE created_at < ?1`).bind(now - 90 * 86400),
+      env.DB.prepare(`DELETE FROM audit_logs WHERE created_at < ?1`).bind(now - retention),
     ]);
   },
 };

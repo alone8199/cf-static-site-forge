@@ -10,7 +10,7 @@ import { hashPassword, verifyPassword, randomId, randomToken, sha256Hex } from "
 import { consumeRate, failureDelayMs, sleep, RULES } from "../lib/ratelimit";
 import { audit } from "../lib/audit";
 import { getCaptchaProvider } from "../lib/turnstile";
-import { readLimits } from "../env";
+import { readLimits, getConfig } from "../config";
 import { createSession, destroySession, sessionCookie, clearSessionCookie, revokeAllSessions, nowSec, readSessionToken } from "../auth/session";
 import { findUserByEmail, findUserById, insertUser, markEmailVerified, updatePassword, recordLoginFailure, recordLoginSuccess, type UserRow } from "../db/users";
 import { resolveRole } from "../auth/roles";
@@ -18,9 +18,9 @@ import { deliverVerification } from "../auth/mail";
 
 export const authRoutes = new Hono<AppEnv>();
 
-const VERIFY_TTL_SECONDS = 24 * 3600;
-const LOCK_THRESHOLD = 5;
-const LOCK_SECONDS = 900;
+const VERIFY_TTL_SECONDS = getConfig().auth.emailVerifyTtlSeconds;
+const LOCK_THRESHOLD = getConfig().auth.lockThreshold;
+const LOCK_SECONDS = getConfig().auth.lockSeconds;
 
 const captchaBody = {
   captchaId: CaptchaIdSchema,
@@ -82,7 +82,10 @@ authRoutes.post("/register", async (c) => {
   return c.json(
     {
       ok: true,
-      message: "注册成功，请完成邮箱验证后再登录",
+      emailSent: delivery.sent,
+      message: delivery.sent
+        ? "注册成功，验证邮件已发送，请完成验证后再登录"
+        : "注册成功，但验证邮件暂未发送，请稍后使用“重新发送验证邮件”",
       // 仅 MAIL_MODE=dev 时返回，生产环境为 undefined
       ...(delivery.devToken ? { devVerificationToken: delivery.devToken } : {}),
     },
@@ -235,7 +238,7 @@ authRoutes.post("/verify-email", async (c) => {
 // ---------- 重新发送验证邮件（不泄露邮箱是否存在）----------
 authRoutes.post("/resend-verification", async (c) => {
   const ip = clientIp(c);
-  await consumeRate(c.env, RULES.register, `resend:${ip ?? "unknown"}`);
+  await consumeRate(c.env, RULES.resendVerification, `resend:${ip ?? "unknown"}`);
   const input = parseOrThrow(ResendSchema, await readJson(c));
   await getCaptchaProvider(c.env).verify(c.env, ip, input);
 
@@ -251,6 +254,6 @@ authRoutes.post("/resend-verification", async (c) => {
       .run();
     await deliverVerification(c.env, user.email, token);
   }
-  // 无论邮箱是否存在，响应一致
+  // 无论邮箱是否存在，响应一致（不泄露账号存在与否）
   return c.json({ ok: true, message: "若该邮箱待验证，验证邮件已发送" });
 });
