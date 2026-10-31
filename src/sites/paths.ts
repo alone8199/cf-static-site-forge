@@ -1,4 +1,4 @@
-/// 路径规范化与防穿越。用户路径只用于展示与匹配 DB 元数据，绝不直接拼接成 R2 key。
+/// 路径规范化与防穿越。用户路径只用于展示与匹配 DB 元数据，绝不直接拼接成 存储键。
 /// 所有限制（长度、深度、黑名单目录/文件名）均来自 config/app.config.ts。
 import { AppError } from "../lib/errors";
 import { getConfig } from "../config";

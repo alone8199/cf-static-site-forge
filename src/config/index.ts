@@ -36,6 +36,10 @@ export function validateConfig(c: AppConfig): void {
   if (c.captcha.minLength < 4 || c.captcha.maxLength > 6 || c.captcha.minLength > c.captcha.maxLength) {
     problems.push("captcha 长度必须在 4–6 之间");
   }
+  // Workers KV 单个值上限 25 MiB
+  if (c.upload.maxFileBytes > 25 * 1024 * 1024) {
+    problems.push("upload.maxFileBytes 不能超过 25 MiB（Workers KV 单值上限）");
+  }
   if (c.upload.maxFileBytes > c.upload.maxUploadBytes) {
     problems.push("upload.maxFileBytes 不能大于 maxUploadBytes");
   }

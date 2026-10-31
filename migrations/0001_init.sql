@@ -39,7 +39,7 @@ CREATE TABLE IF NOT EXISTS sites (
   owner_id      TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   name          TEXT NOT NULL CHECK (length(name) BETWEEN 1 AND 80),
   status        TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active','suspended','deleted')),
-  active_prefix TEXT,                             -- 当前生效的 R2 前缀（manifest 原子切换）
+  active_prefix TEXT,                             -- 当前生效的 存储前缀（manifest 原子切换）
   total_bytes   INTEGER NOT NULL DEFAULT 0,
   file_count    INTEGER NOT NULL DEFAULT 0,
   created_at    INTEGER NOT NULL,
@@ -50,7 +50,7 @@ CREATE INDEX IF NOT EXISTS idx_sites_owner ON sites(owner_id);
 CREATE TABLE IF NOT EXISTS files (
   site_id      TEXT NOT NULL REFERENCES sites(id) ON DELETE CASCADE,
   path         TEXT NOT NULL,                     -- 规范化后的相对路径，如 css/app.css
-  r2_key       TEXT NOT NULL,                     -- 服务端生成，不来自用户输入
+  storage_key       TEXT NOT NULL,                     -- 服务端生成，不来自用户输入
   size         INTEGER NOT NULL CHECK (size >= 0),
   sha256       TEXT NOT NULL,
   content_type TEXT NOT NULL,

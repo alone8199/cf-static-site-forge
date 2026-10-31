@@ -197,7 +197,7 @@ siteRoutes.post("/:siteId/upload", async (c) => {
     replaced = await commitStaged(c.env as Env, site.id, staged, nowSec());
   } catch {
     // 提交失败：回滚本次暂存对象，数据库保持原状
-    await deleteObjects(c.env, staged.map((s) => s.r2Key));
+    await deleteObjects(c.env, staged.map((s) => s.storageKey));
     throw new AppError(500, "commit_failed", "保存失败，请重试");
   }
   await deleteObjects(c.env, replaced);

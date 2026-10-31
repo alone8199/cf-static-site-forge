@@ -1,4 +1,4 @@
-/// 统一错误类型。对外只返回 code 与安全的 message，绝不包含堆栈、SQL、R2 key 或环境变量。
+/// 统一错误类型。对外只返回 code 与安全的 message，绝不包含堆栈、SQL、存储键 或环境变量。
 
 export class AppError extends Error {
   constructor(

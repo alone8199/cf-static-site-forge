@@ -35,7 +35,7 @@ app.onError((e, c) => {
     if (e.retryAfter) c.header("Retry-After", String(e.retryAfter));
     return c.json({ error: { code: e.code, message: e.message } }, e.status);
   }
-  // 只记录错误类型，不记录消息与堆栈，防止泄露 SQL、R2 key 或环境变量
+  // 只记录错误类型，不记录消息与堆栈，防止泄露 SQL、存储键 或环境变量
   console.error("unhandled_error", e instanceof Error ? e.name : "unknown");
   return c.json({ error: { code: "internal_error", message: "服务器内部错误" } }, 500);
 });

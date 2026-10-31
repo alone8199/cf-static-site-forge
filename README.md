@@ -9,7 +9,11 @@
 - 默认通过 **SMTP** 发送验证邮件（支持隐式 TLS 与 STARTTLS）
 - 管理后台：用户列表与禁用、站点删除、审计日志
 
-技术栈：Workers + TypeScript、Hono、zod、D1、R2、KV、WebCrypto。
+技术栈：Workers + TypeScript、Hono、zod、D1（数据）、KV（限速、验证码、用户站点文件）、WebCrypto。
+
+> 存储说明：用户站点文件存放在 Workers KV 中（单值上限 25 MiB，免费套餐每天 1,000 次写入，每个上传文件和每次替换/删除都计入写入次数）。
+> 如需更大容量或更多写入，请升级套餐，或改用 S3 兼容存储（需要替换存储层实现）。
+> KV 是最终一致的：文件刚上传后，其他边缘节点可能需要约 60 秒才能读到新内容。
 
 ---
 
@@ -122,8 +126,8 @@ openssl rand -hex 32
 ```bash
 # 1. 创建资源
 wrangler d1 create cf_static_site_forge        # 把 database_id 填入 wrangler.toml
-wrangler kv namespace create KV                # 把 id 填入 wrangler.toml
-wrangler r2 bucket create cf-static-site-forge-sites
+wrangler kv namespace create KV                # 限速/验证码数据，id 填入 wrangler.toml 的 binding = "KV"
+wrangler kv namespace create FILES_KV          # 用户站点文件，id 填入 binding = "FILES_KV"
 
 # 2. 设置机密
 wrangler secret put CAPTCHA_SECRET
@@ -230,7 +234,7 @@ npm run deploy
 
 **审计**：记录操作者、动作、目标、IP 的 HMAC 哈希、结果、时间。不记录密码、验证码答案、会话 token、验证令牌或文件内容。
 
-**错误响应**：统一 JSON，不返回堆栈、SQL、R2 key 或环境变量；服务端只记录错误类型名。
+**错误响应**：统一 JSON，不返回堆栈、SQL、存储键或环境变量；服务端只记录错误类型名。
 
 ---
 

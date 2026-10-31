@@ -1,7 +1,7 @@
 /// 用户站点的静态文件服务（独立子域 {siteId}.{rootDomain}）。
 /// 安全要点：
 ///   - 只处理 GET/HEAD；不设置任何 Cookie；不读取主应用 Cookie（主应用 Cookie 为 host-only 的 __Host- Cookie）
-///   - 路径经规范化后仅用于查询 files 元数据，R2 key 来自数据库记录，绝不由请求路径拼接
+///   - 路径经规范化后仅用于查询 files 元数据，存储键 来自数据库记录，绝不由请求路径拼接
 ///   - 响应头（沙箱 CSP、nosniff 等）来自配置
 import type { Env } from "../env";
 import { getConfig } from "../config";
@@ -48,13 +48,13 @@ export async function serveSite(request: Request, env: Env, siteId: string): Pro
   if (!path) return plain(404, "Not Found");
 
   const row = await env.DB.prepare(
-    `SELECT f.r2_key AS r2_key, f.content_type AS content_type, f.size AS size,
+    `SELECT f.storage_key AS storage_key, f.content_type AS content_type, f.size AS size,
             f.sha256 AS sha256, s.status AS status
        FROM files f JOIN sites s ON s.id = f.site_id
       WHERE f.site_id = ?1 AND f.path = ?2`,
   )
     .bind(siteId, path)
-    .first<{ r2_key: string; content_type: string; size: number; sha256: string; status: string }>();
+    .first<{ storage_key: string; content_type: string; size: number; sha256: string; status: string }>();
 
   if (!row || row.status !== "active") return plain(404, "Not Found");
 
@@ -75,7 +75,7 @@ export async function serveSite(request: Request, env: Env, siteId: string): Pro
   if (request.method === "HEAD") {
     return new Response(null, { status: 200, headers });
   }
-  const obj = await env.SITES_BUCKET.get(row.r2_key);
-  if (!obj) return plain(404, "Not Found");
-  return new Response(obj.body, { status: 200, headers });
+  const body = await env.FILES_KV.get(row.storage_key, { type: "stream" });
+  if (!body) return plain(404, "Not Found");
+  return new Response(body, { status: 200, headers });
 }

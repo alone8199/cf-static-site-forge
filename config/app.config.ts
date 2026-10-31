@@ -58,6 +58,8 @@ const config: AppConfig = {
   },
 
   // ---------- 上传限额 ----------
+  // 存储后端为 Workers KV：单值上限 25 MiB；每个文件产生 1 次写入，删除/替换也计写入。
+  // 免费套餐每天仅 1,000 次写入，请根据用量选择付费套餐。
   upload: {
     maxFileBytes: 5 * 1024 * 1024, // 单文件 5 MiB
     maxUploadBytes: 20 * 1024 * 1024, // 单次请求总量 20 MiB

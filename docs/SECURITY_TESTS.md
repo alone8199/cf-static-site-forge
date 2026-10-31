@@ -187,7 +187,7 @@ done
 
 | 用例 | 期望 |
 | --- | --- |
-| 用户 A 删除 B 的站点 | 404，B 的站点与 R2 对象均保留 |
+| 用户 A 删除 B 的站点 | 404，B 的站点与 存储对象均保留 |
 | 管理员禁用环境变量超级用户 | 403 `环境变量指定的超级用户不可禁用` |
 | 管理员禁用自己 | 409 `不能禁用自己` |
 | 管理员删除站点后站点域访问 | 404 |
@@ -226,7 +226,7 @@ wrangler d1 execute cf_static_site_forge --remote \
 
 ## 14. 错误信息泄露
 
-- 构造非法 JSON、超长字段、非法 Content-Type，检查响应中不含堆栈、SQL、R2 key、`ADMIN_EMAILS` 等。
+- 构造非法 JSON、超长字段、非法 Content-Type，检查响应中不含堆栈、SQL、存储键、`ADMIN_EMAILS` 等。
 - 检查 `wrangler tail` 中 `unhandled_error` 只包含错误名称。
 
 ---

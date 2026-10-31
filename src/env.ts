@@ -6,7 +6,8 @@ export interface Env {
   // 绑定
   DB: D1Database;
   KV: KVNamespace;
-  SITES_BUCKET: R2Bucket;
+  /** 用户站点文件的存储（独立 KV namespace，与限速/验证码数据隔离） */
+  FILES_KV: KVNamespace;
   ASSETS: Fetcher;
 
   // 超级用户（非机密，但由部署者控制）
