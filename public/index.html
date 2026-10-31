@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>静态建站</title>
+  <link rel="stylesheet" href="/app.css" />
+</head>
+<body>
+  <header class="topbar">
+    <strong>静态建站</strong>
+    <nav id="nav" hidden>
+      <button id="nav-sites" type="button">我的站点</button>
+      <button id="nav-admin" type="button" hidden>管理后台</button>
+      <button id="nav-password" type="button">修改密码</button>
+      <button id="nav-logout" type="button">退出</button>
+    </nav>
+  </header>
+
+  <main id="root"></main>
+  <div id="toast" role="status" aria-live="polite" hidden></div>
+  <script src="/app.js" defer></script>
+</body>
+</html>

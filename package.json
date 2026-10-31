@@ -1,0 +1,25 @@
+{
+  "name": "cf-static-site-forge",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Cloudflare Workers 静态建站与 HTML 上传托管平台（仅静态部署）",
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "db:migrate:local": "wrangler d1 migrations apply cf_static_site_forge --local",
+    "db:migrate:remote": "wrangler d1 migrations apply cf_static_site_forge --remote"
+  },
+  "dependencies": {
+    "hono": "^4.6.0",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20241022.0",
+    "typescript": "^5.6.3",
+    "vitest": "^2.1.4",
+    "wrangler": "^3.84.0"
+  }
+}

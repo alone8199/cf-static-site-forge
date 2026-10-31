@@ -1,0 +1,65 @@
+# Cloudflare Workers 配置（生产值请替换 <...> 占位符）
+# 敏感值不要写在这里，使用 `wrangler secret put` 或 .dev.vars（本地）注入。
+
+name = "cf-static-site-forge"
+main = "src/index.ts"
+compatibility_date = "2024-11-01"
+compatibility_flags = ["nodejs_compat"]
+
+# 主应用域名与用户站点通配符域名（在 Cloudflare DNS 中配置）
+# 主应用: app.example.com
+# 用户站点: *.sites.example.com
+routes = [
+  { pattern = "app.example.com/*", zone_name = "example.com" },
+  { pattern = "*.sites.example.com/*", zone_name = "example.com" }
+]
+
+[vars]
+APP_ORIGIN = "https://app.example.com"
+SITES_ROOT_DOMAIN = "sites.example.com"
+SITES_SCHEME = "https"
+# 逗号分隔。仅"邮箱已验证 + 在此列表中"才视为超级用户。
+ADMIN_EMAILS = "admin@example.com"
+# 可选：逗号分隔的用户 ID
+ADMIN_USER_IDS = ""
+SESSION_TTL_SECONDS = "86400"
+PBKDF2_ITERATIONS = "210000"
+CAPTCHA_TTL_SECONDS = "300"
+CAPTCHA_MAX_ATTEMPTS = "3"
+# 单文件 / 单次上传 / 站点总量 / 文件数（字节或个数）
+MAX_FILE_BYTES = "5242880"
+MAX_UPLOAD_BYTES = "20971520"
+MAX_SITE_BYTES = "104857600"
+MAX_SITE_FILES = "500"
+# 验证码提供方：image（内置图片验证码）| turnstile（预留适配器）
+CAPTCHA_PROVIDER = "image"
+
+# 前端静态资源（登录、注册、站点管理、管理后台页面）
+[assets]
+directory = "./public"
+binding = "ASSETS"
+# 必须：Worker 先执行，由它做 Host 分流；否则站点子域会被 Assets 直接服务 public/ 内容
+run_worker_first = true
+
+# 邮件模式：none（默认，生产安全）| dev（仅本地）| webhook（生产增强，需 MAIL_WEBHOOK_URL）
+# MAIL_MODE = "none"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "cf_static_site_forge"
+database_id = "<your-d1-database-id>"
+migrations_dir = "migrations"
+
+[[kv_namespaces]]
+binding = "KV"
+id = "<your-kv-namespace-id>"
+
+[[r2_buckets]]
+binding = "SITES_BUCKET"
+bucket_name = "cf-static-site-forge-sites"
+
+# 注意：Secrets（不要写入本文件）
+# wrangler secret put CAPTCHA_SECRET
+# wrangler secret put BOOTSTRAP_TOKEN        （可选，一次性管理员初始化）
+# wrangler secret put IP_HASH_SECRET
+# wrangler secret put SESSION_SECRET

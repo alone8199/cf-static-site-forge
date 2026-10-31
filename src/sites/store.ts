@@ -1,0 +1,220 @@
+/// 站点与文件的 D1 / R2 操作。
+/// 不变量：
+///   - R2 key 只由服务端生成：users/{ownerId}/sites/{siteId}/{uploadId}/{normalizedPath}
+///   - 用户输入的路径只用于 files.path 元数据匹配，不参与 R2 寻址拼接之外的任何用途
+///   - 提交（D1 批量事务）成功后才替换生效；失败则删除本次暂存的 R2 对象（回滚）
+import type { Env } from "../env";
+import { randomId, sha256Hex } from "../lib/crypto";
+import { AppError } from "../lib/errors";
+import type { Limits } from "../env";
+
+export interface SiteRow {
+  id: string;
+  owner_id: string;
+  name: string;
+  status: "active" | "suspended" | "deleted";
+  total_bytes: number;
+  file_count: number;
+  created_at: number;
+  updated_at: number;
+}
+
+export interface StagedFile {
+  path: string;
+  r2Key: string;
+  size: number;
+  sha256: string;
+  contentType: string;
+}
+
+export const MAX_SITES_PER_USER = 20;
+
+export async function countActiveSites(env: Env, ownerId: string): Promise<number> {
+  const row = await env.DB.prepare(
+    `SELECT COUNT(*) AS n FROM sites WHERE owner_id = ?1 AND status != 'deleted'`,
+  )
+    .bind(ownerId)
+    .first<{ n: number }>();
+  return row?.n ?? 0;
+}
+
+export async function insertSite(
+  env: Env,
+  args: { id: string; ownerId: string; name: string; now: number },
+): Promise<void> {
+  await env.DB.prepare(
+    `INSERT INTO sites (id, owner_id, name, status, total_bytes, file_count, created_at, updated_at)
+     VALUES (?1, ?2, ?3, 'active', 0, 0, ?4, ?4)`,
+  )
+    .bind(args.id, args.ownerId, args.name, args.now)
+    .run();
+}
+
+/// 按 ID 查站点。ownerId 非空时同时校验归属（越权统一返回 null → 上层 404）。
+export async function getSite(env: Env, siteId: string, ownerId?: string): Promise<SiteRow | null> {
+  if (ownerId) {
+    return env.DB.prepare(
+      `SELECT * FROM sites WHERE id = ?1 AND owner_id = ?2 AND status != 'deleted'`,
+    )
+      .bind(siteId, ownerId)
+      .first<SiteRow>();
+  }
+  return env.DB.prepare(`SELECT * FROM sites WHERE id = ?1 AND status != 'deleted'`)
+    .bind(siteId)
+    .first<SiteRow>();
+}
+
+export async function listSitesByOwner(env: Env, ownerId: string): Promise<SiteRow[]> {
+  const res = await env.DB.prepare(
+    `SELECT * FROM sites WHERE owner_id = ?1 AND status != 'deleted' ORDER BY created_at DESC`,
+  )
+    .bind(ownerId)
+    .all<SiteRow>();
+  return res.results ?? [];
+}
+
+export async function listFileRows(
+  env: Env,
+  siteId: string,
+): Promise<{ path: string; r2_key: string; size: number; content_type: string }[]> {
+  const res = await env.DB.prepare(
+    `SELECT path, r2_key, size, content_type FROM files WHERE site_id = ?1`,
+  )
+    .bind(siteId)
+    .all<{ path: string; r2_key: string; size: number; content_type: string }>();
+  return res.results ?? [];
+}
+
+/// 将暂存对象写入 R2。任一失败则删除已写入的对象并抛错。
+export async function stageObjects(
+  env: Env,
+  ownerId: string,
+  siteId: string,
+  uploadId: string,
+  files: { path: string; bytes: ArrayBuffer; contentType: string }[],
+): Promise<StagedFile[]> {
+  const staged: StagedFile[] = [];
+  try {
+    for (const f of files) {
+      const r2Key = `users/${ownerId}/sites/${siteId}/${uploadId}/${f.path}`;
+      const body = new Uint8Array(f.bytes);
+      await env.SITES_BUCKET.put(r2Key, body, {
+        httpMetadata: { contentType: f.contentType },
+      });
+      staged.push({
+        path: f.path,
+        r2Key,
+        size: body.byteLength,
+        sha256: await sha256Hex(body),
+        contentType: f.contentType,
+      });
+    }
+    return staged;
+  } catch {
+    await deleteObjects(env, staged.map((s) => s.r2Key));
+    throw new AppError(500, "upload_failed", "上传失败，请重试");
+  }
+}
+
+/// 原子提交：一个 D1 batch（事务）内完成 upsert + 重算站点总量。
+/// 返回需要清理的旧 R2 key（提交成功后再删除）。
+export async function commitStaged(
+  env: Env,
+  siteId: string,
+  staged: StagedFile[],
+  now: number,
+): Promise<string[]> {
+  const existing = await env.DB.prepare(
+    `SELECT path, r2_key FROM files WHERE site_id = ?1`,
+  )
+    .bind(siteId)
+    .all<{ path: string; r2_key: string }>();
+  const oldByPath = new Map((existing.results ?? []).map((r) => [r.path, r.r2_key]));
+
+  const stmts = staged.map((f) =>
+    env.DB.prepare(
+      `INSERT INTO files (site_id, path, r2_key, size, sha256, content_type, created_at)
+       VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+       ON CONFLICT(site_id, path) DO UPDATE SET
+         r2_key = excluded.r2_key, size = excluded.size, sha256 = excluded.sha256,
+         content_type = excluded.content_type, created_at = excluded.created_at`,
+    ).bind(siteId, f.path, f.r2Key, f.size, f.sha256, f.contentType, now),
+  );
+  stmts.push(
+    env.DB.prepare(
+      `UPDATE sites SET
+         total_bytes = (SELECT COALESCE(SUM(size), 0) FROM files WHERE site_id = ?1),
+         file_count  = (SELECT COUNT(*) FROM files WHERE site_id = ?1),
+         updated_at  = ?2
+       WHERE id = ?1`,
+    ).bind(siteId, now),
+  );
+
+  await env.DB.batch(stmts);
+
+  const replaced: string[] = [];
+  for (const f of staged) {
+    const old = oldByPath.get(f.path);
+    if (old && old !== f.r2Key) replaced.push(old);
+  }
+  return replaced;
+}
+
+/// 计算配额：旧文件被替换后剩余空间，新文件总量不得超过限制。
+export function checkQuota(
+  limits: Limits,
+  site: SiteRow,
+  existing: { path: string; size: number }[],
+  incoming: { path: string; size: number }[],
+): void {
+  const existingByPath = new Map(existing.map((e) => [e.path, e.size]));
+  let total = 0;
+  const merged = new Map<string, number>();
+  for (const [p, s] of existingByPath) merged.set(p, s);
+  for (const f of incoming) merged.set(f.path, f.size);
+  for (const s of merged.values()) total += s;
+
+  if (merged.size > limits.maxSiteFiles) {
+    throw new AppError(413, "too_many_files", `站点文件数量超过上限（${limits.maxSiteFiles}）`);
+  }
+  if (total > limits.maxSiteBytes) {
+    throw new AppError(413, "site_quota_exceeded", "站点总容量超过上限");
+  }
+  void site;
+}
+
+export async function deleteObjects(env: Env, keys: string[]): Promise<void> {
+  // R2 delete 支持数组；逐个删除以便单个失败不影响其他
+  for (const key of keys) {
+    try {
+      await env.SITES_BUCKET.delete(key);
+    } catch {
+      // 清理失败只影响孤儿对象，不应影响主流程；不记录 key 以免泄露结构
+    }
+  }
+}
+
+/// 软删除站点：标记 deleted、删除文件元数据、清理 R2 对象
+export async function softDeleteSite(env: Env, siteId: string, now: number): Promise<void> {
+  const rows = await listFileRows(env, siteId);
+  await env.DB.batch([
+    env.DB.prepare(`UPDATE sites SET status = 'deleted', updated_at = ?2 WHERE id = ?1`).bind(siteId, now),
+    env.DB.prepare(`DELETE FROM files WHERE site_id = ?1`).bind(siteId),
+    env.DB.prepare(
+      `UPDATE sites SET total_bytes = 0, file_count = 0 WHERE id = ?1`,
+    ).bind(siteId),
+  ]);
+  await deleteObjects(env, rows.map((r) => r.r2_key));
+}
+
+export function newSiteId(): string {
+  return randomId(16);
+}
+
+export function newUploadId(): string {
+  return randomId(8);
+}
+
+export function siteUrl(env: Env, siteId: string): string {
+  return `${env.SITES_SCHEME}://${siteId}.${env.SITES_ROOT_DOMAIN}/`;
+}

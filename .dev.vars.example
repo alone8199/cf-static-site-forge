@@ -1,0 +1,7 @@
+# 复制为 .dev.vars 后填写（已在 .gitignore 中，切勿提交）
+CAPTCHA_SECRET=replace-with-64-hex-chars
+IP_HASH_SECRET=replace-with-64-hex-chars
+SESSION_SECRET=replace-with-64-hex-chars
+# 可选：一次性管理员初始化令牌（用后即删，见 README）
+BOOTSTRAP_TOKEN=
+MAIL_MODE=none

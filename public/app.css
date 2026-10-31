@@ -1,0 +1,25 @@
+:root { color-scheme: light; --fg:#111827; --muted:#6b7280; --line:#e5e7eb; --accent:#2563eb; --danger:#b91c1c; --bg:#f9fafb; }
+* { box-sizing: border-box; }
+body { margin:0; font: 15px/1.5 system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif; color:var(--fg); background:var(--bg); }
+.topbar { display:flex; justify-content:space-between; align-items:center; padding:12px 20px; background:#fff; border-bottom:1px solid var(--line); }
+nav { display:flex; gap:8px; flex-wrap:wrap; }
+main { max-width: 880px; margin: 24px auto; padding: 0 16px; }
+.card { background:#fff; border:1px solid var(--line); border-radius:10px; padding:20px; margin-bottom:16px; }
+h2 { margin:0 0 12px; font-size:18px; }
+label { display:block; margin:10px 0 4px; color:var(--muted); font-size:13px; }
+input, select { width:100%; padding:9px 10px; border:1px solid #d1d5db; border-radius:8px; font:inherit; }
+button { padding:8px 14px; border:1px solid var(--line); background:#fff; border-radius:8px; cursor:pointer; font:inherit; }
+button.primary { background:var(--accent); color:#fff; border-color:var(--accent); }
+button.danger { color:var(--danger); }
+button:disabled { opacity:.5; cursor:not-allowed; }
+.row { display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+.captcha { display:flex; gap:8px; align-items:center; }
+.captcha img { height:70px; border:1px solid var(--line); border-radius:8px; background:#f8fafc; }
+table { width:100%; border-collapse:collapse; font-size:14px; }
+th, td { text-align:left; padding:8px; border-bottom:1px solid var(--line); vertical-align:top; word-break: break-all; }
+.muted { color:var(--muted); font-size:13px; }
+.error { color:var(--danger); font-size:14px; min-height:1.4em; }
+.progress { height:8px; background:#e5e7eb; border-radius:4px; overflow:hidden; }
+.progress > div { height:100%; width:0; background:var(--accent); transition: width .15s; }
+#toast { position:fixed; bottom:20px; left:50%; transform:translateX(-50%); background:#111827; color:#fff; padding:10px 16px; border-radius:8px; }
+[hidden] { display:none !important; }
