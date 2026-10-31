@@ -29,12 +29,12 @@ run_worker_first = true
 [[d1_databases]]
 binding = "DB"
 database_name = "cf_static_site_forge"
-database_id = "<your-d1-database-id>"
+database_id = "838cdb04-6525-4d57-8f9e-14865a435544"
 migrations_dir = "migrations"
 
 [[kv_namespaces]]
 binding = "KV"
-id = "<your-kv-namespace-id>"
+id = "5ea816da0fbb4d0da5392d5f1b8aa06d"
 
 # 用户站点文件存储（独立 KV namespace，避免与限速、验证码数据混用）
 [[kv_namespaces]]
